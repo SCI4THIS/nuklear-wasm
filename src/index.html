@@ -22,6 +22,8 @@ var prog = { };
 var prag = { };
 var vbo = { };
 var m = { };
+var wasm_done = false;
+var document_done = false;
 //var table = new WebAssembly.Table({ initial: 5, element: "externref" });
 var nuklear = { };
 var input = [ ];
@@ -783,7 +785,9 @@ function draw_gl()
 
 function start()
 {
-  init_gl();
+  if (document_done && wasm_done) {
+    init_gl();
+  }
 }
 
 function malloc_int(i32)
@@ -836,8 +840,11 @@ const importObject = {
     memoryBase: 0,
     __assert_fail: function(i32_1, i32_2, i32_3, i32_4) {
       console.log("__assert_fail(" + i32_1 + "," + i32_2 + "," + i32_3 + "," + i32_4 + ")");
-      let s1 = s_from_printf(i32_1, i32_2);
-      console.error(s1);
+      let assertion = str_c(i32_1);
+      let file = str_c(i32_2);
+      let line = i32_3;
+      let func = str_c(i32_4);
+      console.error(file + ":" + line + ":" + func + ":" + assertion);
       throw new Error("assert_fail");
     },
     atof: function(i32_1) {
@@ -1254,8 +1261,9 @@ console.log({b_r,b_g,b_b,b_a});
   }
 };
 
-WebAssembly.instantiateStreaming(fetch("nuklear.wasm"), importObject).then(
-//WebAssembly.instantiateStreaming(fetch("nuklear-temp.wasm"), importObject).then(
+WebAssembly.instantiateStreaming(fetch(
+"nuklear.wasm"
+), importObject).then(
   function (obj) {
     memory = new Uint8Array(obj.instance.exports.memory.buffer);
     wasm = obj;
@@ -1263,6 +1271,9 @@ WebAssembly.instantiateStreaming(fetch("nuklear.wasm"), importObject).then(
     start();
   }
 )
+
+window.onload = function() { document_done = true; start(); }
+
 </script>
 <script src="IntelMono-glf.js">
 </script>
