@@ -33,7 +33,6 @@ function mousemove(e)
   let x = e.clientX;
   let y = e.clientY;
   input.push([ wasm.instance.exports.nk_input_motion, [nuklear.ctx, x, y ]]);
-  draw_gl();
 }
 
 function lookup_button(button)
@@ -51,8 +50,6 @@ function mousedown(e)
   let y = e.clientY;
   let button = lookup_button(e.button);
   input.push([ wasm.instance.exports.nk_input_button, [ nuklear.ctx, button, x, y, true ]]);
-  draw_gl();
-  draw_gl();
 }
 
 function mouseup(e)
@@ -61,8 +58,6 @@ function mouseup(e)
   let y = e.clientY;
   let button = lookup_button(e.button);
   input.push([ wasm.instance.exports.nk_input_button, [ nuklear.ctx, button, x, y, false ]]);
-  draw_gl();
-  draw_gl();
 }
 
 function lookup_cmap_glyph_sub(cmap, char_code)
@@ -346,7 +341,6 @@ function resize()
   m.caM.set(1, 1, -2 / el.height);
   m.caM.set(0, 3, -1.0);
   m.caM.set(1, 3, 1.0);
-  draw_gl();
 }
 
 function init_nk()
@@ -649,6 +643,8 @@ function init_gl()
   window.onmouseup   = mouseup;
 
   resize();
+
+  draw_gl(); /* Kick off draw sequence */
 }
 
 function init_draw_char()
@@ -744,6 +740,7 @@ function draw_shape(n)
 
 function draw_gl()
 {
+  let starttime = Date.now();
   gl.clearColor(bg.r, bg.g, bg.b, bg.a);
   gl.clear(gl.COLOR_BUFFER_BIT + gl.DEPTH_BUFFER_BIT);
   wasm.instance.exports.nk_rect(nuklear.rect, 50, 50, 230, 250);
@@ -781,6 +778,9 @@ function draw_gl()
   wasm.instance.exports.nk_wasm_draw(nuklear.ctx);
   //console.log({draw_stack});
   input = [];
+  let duration = Date.now() - starttime;
+  let frame_len = 1000 / 60; /* ms per from at 60fps */
+  setTimeout(draw_gl, frame_len - duration);
 }
 
 function start()
