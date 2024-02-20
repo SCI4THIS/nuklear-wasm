@@ -792,6 +792,13 @@ function start()
 
 function malloc_int(i32)
 {
+  let res = wasm.instance.exports.my_malloc(i32);
+  console.log(res);
+  return res;
+}
+
+function malloc_int_old(i32)
+{
   if (tail == 0) {
     tail = memory.length;
   }
@@ -948,6 +955,7 @@ const importObject = {
       return malloc_int(i32);
     },
     free: function(i32) {
+	/*
       console.log("free(" + i32 + ")");
       let ptr = i32 - 5;
       memory[ptr] = 0;
@@ -958,6 +966,7 @@ const importObject = {
                 (1 <<  0) * memory[tail + 1];
         tail = tail + n;
       }
+	*/
     },
     memset: function(i32_1, i32_2, i32_3) {
       console.log("memset(" + i32_1 + "," + i32_2 + "," + i32_3 + ")");
@@ -1272,8 +1281,6 @@ WebAssembly.instantiateStreaming(fetch(
   }
 )
 
-window.onload = function() { document_done = true; start(); }
-
 </script>
 <script src="IntelMono-glf.js">
 </script>
@@ -1281,5 +1288,11 @@ window.onload = function() { document_done = true; start(); }
 <body>
 <canvas id="canvas" style="position: absolute; right: 0px; bottom: 0px;">
 </canvas>
+<script>
+/* window.onload doesn't work as expected on mobile.
+ * workaround by executing this at end */
+document_done = true;
+start();
+</script>
 </body>
 </html>
