@@ -32,3 +32,5 @@ function Prag(options)
     run: NS_Prag.run
   };
 }
+
+module.exports.Prag = Prag;

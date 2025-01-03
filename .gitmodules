@@ -1,3 +1,6 @@
 [submodule "Nuklear"]
 	path = Nuklear
 	url = https://github.com/Immediate-Mode-UI/Nuklear
+[submodule "tarballjs"]
+	path = tarballjs
+	url = https://github.com/ankitrohatgi/tarballjs

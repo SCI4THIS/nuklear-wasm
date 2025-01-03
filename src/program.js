@@ -130,3 +130,4 @@ function Program(options)
   return _program;
 }
 
+module.exports.Program = Program;

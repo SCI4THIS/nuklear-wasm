@@ -55,3 +55,4 @@ function VBO(options)
   };
 }
 
+module.exports.VBO = VBO;

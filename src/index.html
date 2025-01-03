@@ -2,1297 +2,235 @@
 <html>
 <head>
 <title>Nuklear-wasm</title>
-<script src="matrix.js">
-</script>
-<script src="vbo.js">
-</script>
-<script src="program.js">
-</script>
-<script src="prag.js">
+<script src="tarball.js">
 </script>
 <script>
-var wasm;
-var gl;
-var glf;
-var memory;
-var tail = 0;
-var bg = { r: 0.1, g: 0.18, b: 0.24, a: 1.0 };
-var draw_stack = { };
-var prog = { };
-var prag = { };
-var vbo = { };
-var m = { };
-var wasm_done = false;
-var document_done = false;
-//var table = new WebAssembly.Table({ initial: 5, element: "externref" });
-var nuklear = { };
-var input = [ ];
 
-function mousemove(e)
+function run() {
+  requires([ "./program.js", "./prag.js", "./vbo.js", "./matrix.js", "./IntelOneMono-Regular.glf.js", "./sys.js", "./gl.js", "./glf.js", "./nuklear.js", "./handler.js" ]);
+  dataurls([ "./nuklear.wasm" ]);
+}
+
+var g = {
+
+  modules_i: 0,
+  modules_n: 9999,
+  modules: { },
+
+  dataurls_i: 0,
+  dataurls_n: 9999,
+  dataurls: { },
+
+  finished_cb: function() { main(); },
+  is_staging: true,
+  tar_hash: { },
+
+  gl: null,
+}
+
+let add_fx = function(object, tag)
 {
-  let x = e.clientX;
-  let y = e.clientY;
-  input.push([ wasm.instance.exports.nk_input_motion, [nuklear.ctx, x, y ]]);
+  this.fxs.push({ object, tag });
 }
 
-function lookup_button(button)
+let run_fxs = function(tag, args)
 {
-  switch (button) {
-    case 0:
-      return 0; /* NK_BUTTON_LEFT */
-  }
-  return 0;
-}
-
-function mousedown(e)
-{
-  let x = e.clientX;
-  let y = e.clientY;
-  let button = lookup_button(e.button);
-  input.push([ wasm.instance.exports.nk_input_button, [ nuklear.ctx, button, x, y, true ]]);
-}
-
-function mouseup(e)
-{
-  let x = e.clientX;
-  let y = e.clientY;
-  let button = lookup_button(e.button);
-  input.push([ wasm.instance.exports.nk_input_button, [ nuklear.ctx, button, x, y, false ]]);
-}
-
-function lookup_cmap_glyph_sub(cmap, char_code)
-{
-  switch (cmap.format) {
-    case 0: return null;
-    case 4:
-      let i;
-      let length = cmap.startCode.length;
-      if (length != cmap.endCode.length) {
-        alert("cmap length mismatch startCode != endCode");
-        return null;
-      }
-      if (length != cmap.idRangeOffset.length) {
-        alert("cmap length mismatch startCode != idRangeOffset");
-        return null;
-      }
-      if (length != cmap.idDelta.length) {
-        alert("cmap length mismatch startCode != idDelta");
-        return null;
-      }
-      for (i=0; i<length; i++) {
-        if (cmap.startCode[i] <= char_code && char_code <= cmap.endCode[i]) {
-          break;
-	}
-      }
-      if (i == length) {
-        return null;
-      }
-      if (cmap.idRangeOffset[i] == 0) {
-        return cmap.idDelta[i] + char_code;
-      }
-      let index_offset = i + cmap.idRangeOffset[i] / 2 + (char_code - cmap.startCode[i]);
-      if (index_offset < cmap.idRangeOffset.length) {
-        return cmap.idRangeOffset[index_offset];
-      }
-      if (index_offset - length < cmap.glyphIdArray.length) {
-        return cmap.glyphIdArray[index_offset - length];
-      }
-      return null;
-      break;
-    case 6:
-      if (cmap.firstCode <= char_code && char_code < (cmap.firstCode + cmap.entryCount)) {
-        return cmap.glyphIdArray[char_code - cmap.firstCode];
-      }
-      return null;
-    default:
-      alert("(Lookup) Unhandled format: " + cmap.format);
-      break;
-
-  }
-}
-
-function lookup_cmap_glyph(cmap, char_code)
-{
-  let ret = null;
-  for (let i=0; i<cmap.subtables.length; i++) {
-    ret = lookup_cmap_glyph_sub(cmap.subtables[i], char_code);
-    if (ret != null) {
-      break;
-    }
-  }
-  return ret;
-}
-
-function s_printf_f(modifier, data, output_type)
-{
-  let data_orig = data;
-  let n = (1 << 24) * memory[data + 3] +
-          (1 << 16) * memory[data + 2] +
-          (1 <<  8) * memory[data + 1] +
-          (1 <<  0) * memory[data + 0];
-  data += 4;
-  let sign = 0;
-  if (n & 0x80000000) {
-    sign = 1;
-  }
-  let exponent = (n & 0x7F800000) >> 22;
-  let fraction = (n & 0x007FFFFF);
-  let num = fraction * Math.pow(2,exponent-127);
-  let s = "";
-  if (n == 0) {
-    s += 0;
-  } else {
-    s += num;
-  }
-  console.log({data_orig, n, sign, exponent, fraction });
-  return { s: s, n: data - data_orig };
-}
-
-function s_printf_lf(modifier, data, output_type)
-{
-  let data_orig = data;
-  let n2 = (1 << 24) * memory[data + 3] +
-           (1 << 16) * memory[data + 2] +
-           (1 <<  8) * memory[data + 1] +
-           (1 <<  0) * memory[data + 0];
-  data += 4;
-  let n1 = (1 << 24) * memory[data + 3] +
-           (1 << 16) * memory[data + 2] +
-           (1 <<  8) * memory[data + 1] +
-           (1 <<  0) * memory[data + 0];
-  let sign = 0;
-  if (n1 & 0x80000000) {
-    sign = 1;
-  }
-  let exponent =  (n1 & 0x7FF00000) >> 20;
-  let fraction1 = (n1 & 0x000FFFFF);
-  let fraction2 = (n2);
-  let fraction = ((0x00100000 | fraction1) << 32) + fraction2;
-  let num = (fraction / 1048576.0) * Math.pow(2,exponent-1023);
-  data += 4;
-  let s = "";
-  if (n1 == 0 && n2 == 0) {
-    s = "0.00";
-  } else {
-    if (modifier == ".2") {
-      s += (Math.round(num * 100) / 100).toFixed(2);
-    } else {
-      s += num;
-    }
-  }
-  return { s: s, n: data - data_orig };
-}
-
-function s_printf_d(modifier, data, output_type)
-{
-  let left_align = false;
-  let zero_pad = false;
-  let i = 0;
-  let data_orig = data;
-  if (modifier[i] == '-') {
-    left_align = true;
-    i++;
-  }
-  if (modifier[i] == '0') {
-    zero_pad = true;
-    i++;
-  }
-  if (modifier[i] == 'l') {
-    i++;
-  }
-  let width = 0;
-  if (i >= modifier.length) {
-  } else if (modifier[i] == '*') {
-    width = (1 << 24) * memory[data + 3] +
-            (1 << 16) * memory[data + 2] +
-            (1 <<  8) * memory[data + 1] +
-            (1 <<  0) * memory[data + 0];
-    data += 4;
-  } else if ('1' <= modifier[i] && modifier[i] <= '9') {
-    width = Number(modifier.substr(i));
-  } else {
-    console.error("Unhandled modifier: " + modifier);
-  }
-
-  let n = (1 << 24) * memory[data + 3] +
-          (1 << 16) * memory[data + 2] +
-          (1 <<  8) * memory[data + 1] +
-          (1 <<  0) * memory[data + 0];
-  data += 4;
-
-  let s;
-  if (output_type == 'd') {
-    s = n.toString(10);
-  } else if (output_type == 'u') {
-    if (n < 0) {
-      n = 2147483647 + n;
-    }
-    s = n.toString(10);
-  } else if (output_type == 'x') {
-    s = n.toString(16);
-  } else if (output_type == 'X') {
-    s = n.toString(16).toUpperCase();
-  }
-  if (width != 0) {
-    let adjust = width - s.length;
-    for (let i=0; i<adjust; i++) {
-      if (left_align) {
-        s = s + " ";
-      } else if (zero_pad) {
-        s = "0" + s;
-      } else {
-        s = " " + s;
-      }
-    }
-  }
-
-  return { s: s, n: data - data_orig };
-}
-
-
-function s_from_printf(i32_1, i32_2)
-{
-  let fmt = i32_1;
-  let data = i32_2;
-  let s = "";
-  let i = 0;
-  let modifier = "";
-  while (memory[fmt + i] != 0) {
-    let c = String.fromCharCode(memory[fmt + i]);
-    if (c != '%') {
-      s += String.fromCharCode(memory[fmt + i]);
-      i++;
-      modifier = "";
-      continue;
-    }
-    let is_modifier = false;
-    i++;
-    do {
-      c = String.fromCharCode(memory[fmt + i]);
-      is_modifier = false;
-      switch (c) {
-        case '%': s += "%"; break;
-        case '-':
-        case '*':
-        case '.':
-        case ' ':
-	case 'l':
-        case '0': case '1': case '2': case '3': case '4':
-        case '5': case '6': case '7': case '8': case '9':
-          modifier += c;
-          is_modifier = true;
-          break;
-        case 'f':
-          res = s_printf_lf(modifier, data, c);
-          data += res.n;
-          s += res.s;
-          break;
-        case 'd': 
-        case 'u': 
-        case 'x': 
-        case 'X': 
-          res = s_printf_d(modifier, data, c);
-          data += res.n;
-          s += res.s;
-          break;
-        case 'p':
-          res = s_printf_d("08X", data, 'X');
-          data += res.n;
-          s += "0x" + res.s;
-          break;
-        case 'c':
-          let cc = (1 << 24) * memory[data + 3] +
-                   (1 << 16) * memory[data + 2] +
-                   (1 <<  8) * memory[data + 1] +
-                   (1 <<  0) * memory[data + 0];
-          data += 4;
-          s += String.fromCharCode(cc);
-          break;
-        case 's':
-          let s_n = (1 << 24) * memory[data + 3] +
-                    (1 << 16) * memory[data + 2] +
-                    (1 <<  8) * memory[data + 1] +
-                    (1 <<  0) * memory[data + 0];
-          data += 4;
-          let s_c = memory[s_n];
-          while (s_c != 0) {
-            s += String.fromCharCode(s_c);
-            s_n++;
-            s_c = memory[s_n];
-          }
-          break;
-        default:
-          s += "%" + modifier + c;
-          break;
-      }
-      i++;
-    } while (is_modifier);
-  }
-  return s;
-}
-
-function resize()
-{
-  let el = document.getElementById("canvas");
-  el.width = window.innerWidth;
-  el.height = window.innerHeight;
-  gl.viewport(0,0,el.width,el.height);
-  m.caM.set(0, 0, 2 / el.width);
-  m.caM.set(1, 1, -2 / el.height);
-  m.caM.set(0, 3, -1.0);
-  m.caM.set(1, 3, 1.0);
-}
-
-function init_nk()
-{
-  console.log("init.nk()");
-  nuklear.ctx = malloc_int(18328);
-  nuklear.cmds = malloc_int(120);
-  nuklear.rect = malloc_int(16);
-  nuklear.property = malloc_int(4);
-  nuklear.bg = malloc_int(4 * 4);
-  nuklear.s = {
-    Demo: c_str("Demo"),
-    button: c_str("button"),
-    easy: c_str("easy"),
-    hard: c_str("hard"),
-    Compression: c_str("Compression:"),
-    background: c_str("background:"),
-    R: c_str("#R:"),
-    G: c_str("#G:"),
-    B: c_str("#B:"),
-    A: c_str("#A:")
-
-  }
-  nuklear.glfont = wasm.instance.exports.alloc_nk_glfont(16.0, 10.512);
-  nuklear.drawcmd = malloc_int(32);
-  nuklear.op = 1;
-  wasm.instance.exports.nk_init_default(nuklear.ctx, nuklear.glfont);
-  wasm.instance.exports.nk_buffer_init_default(nuklear.cmds);
-}
-
-
-function create_prag_glf(caM_data, vbo)
-{
-  return Prag({
-    gl: gl,
-    vars: {
-      coord: [ 'vertexAttribPointer', 2, gl.FLOAT, false, 4 * 4, 0 ],
-      texCoord: [ 'vertexAttribPointer', 2, gl.FLOAT, false, 4 * 4, 2 * 4 ],
-      caM: [ 'uniformMatrix4fv', false, caM_data ]
-    },
-    vbo: {
-      coord: vbo,
-      texCoord: vbo
-    }
-  });
-}
-
-function create_prog_glf()
-{
-  let options = {
-    gl: gl,
-    src: { },
-    location_fx: {
-      coord: 'getAttribLocation',
-      texCoord: 'getAttribLocation',
-      caM: 'getUniformLocation'
-    },
-    enable_fx: {
-      coord: 'enableVertexAttribArray',
-      texCoord: 'enableVertexAttribArray',
-    }
-  }
-  options.src[gl.VERTEX_SHADER] = `
-precision highp float;
-attribute vec2  coord;
-attribute vec2  texCoord;
-varying   vec2  st;
-uniform   mat4  caM;
-
-void main() {
-  st = texCoord;
-  gl_Position = caM * vec4(coord.x, coord.y, 0.0, 1.0);
-}
-`;
-
-  options.src[gl.FRAGMENT_SHADER] = `
-precision highp float;
-varying vec2 st;
-void main() {
-  float flip  = 0.0;
-  float s     = st.x;
-  float t     = st.y;
-  float alpha = 1.0;
-  if (t < 0.0) {
-    flip = 1.0;
-    t    = -t;
-  }
-  if (1.0 - (s * s) < t) {
-    alpha = flip;
-  } else {
-    alpha = 1.0 - flip;
-  }
-  if (alpha == 1.0) {
-    gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);
-  } else {
-    discard;
-  }
-}
-`;
-  return Program(options);
-}
-
-function create_prog_shape()
-{
-  let options = {
-    gl: gl,
-    src: { },
-    location_fx: {
-      coord: 'getAttribLocation',
-      color: 'getAttribLocation',
-      mode_st: 'getAttribLocation',
-      caM: 'getUniformLocation'
-    },
-    enable_fx: {
-      coord: 'enableVertexAttribArray',
-      color: 'enableVertexAttribArray',
-      mode_st: 'enableVertexAttribArray'
-    }
-  }
-  options.src[gl.VERTEX_SHADER] = `
-precision highp float;
-attribute vec2  coord;
-attribute vec4  color;
-attribute vec4  mode_st;
-
-varying   vec4  frag_color;
-varying   vec4  frag_mode_st;
-
-uniform   mat4  caM;
-
-void main() {
-  frag_color   = color;
-  frag_mode_st = mode_st;
-
-  gl_Position = caM * vec4(coord.x, coord.y, 0.0, 1.0);
-}
-`;
-
-  options.src[gl.FRAGMENT_SHADER] = `
-precision highp float;
-varying vec4 frag_color;
-varying vec4 frag_mode_st;
-
-void main() {
-  if (frag_mode_st[0] == 0.0) {
-    gl_FragColor = frag_color;
-  } else if (frag_mode_st[0] == 1.0) {
-    float s = frag_mode_st[1];
-    float t = frag_mode_st[2];
-    if ((s * s + t * t) <= 1.0) {
-      gl_FragColor = frag_color;
-    } else {
-      discard;
-    }
-  } else if (frag_mode_st[0] == 2.0) {
-    float s = frag_mode_st[1];
-    float t = frag_mode_st[2];
-    float lt = frag_mode_st[3];
-    float mag = sqrt((s * s) + (t * t));
-    if (mag <= (1.0 + lt) && mag >= (1.0 - lt)) {
-      gl_FragColor = frag_color;
-    } else {
-      discard;
+  for (let i=0; i<this.fxs.length; i++) {
+    if (this.fxs[i].tag == tag) {
+      this.fxs[i].object[tag](args);
     }
   }
 }
-`;
-  return Program(options);
-}
 
-function create_prag_shape(caM_data, vbo)
+function add_fxs(import_object, fxs)
 {
-  return Prag({
-    gl: gl,
-    vars: {
-      mode_st: [ 'vertexAttribPointer', 4, gl.FLOAT, false, 4 * 10, 4 * 0 ],
-      color:   [ 'vertexAttribPointer', 4, gl.FLOAT, false, 4 * 10, 4 * 4 ],
-      coord:   [ 'vertexAttribPointer', 2, gl.FLOAT, false, 4 * 10, 4 * 8 ],
-      caM: [ 'uniformMatrix4fv', false, caM_data ]
-    },
-    vbo: {
-      coord: vbo,
-      color: vbo,
-      mode_st: vbo
-    }
-  });
-}
-
-function add_shape_pt(i,x,y,r,g,b,a,mode,s,t,lt)
-{
-  m["shape"].set(0,i,mode);
-  m["shape"].set(1,i,s);
-  m["shape"].set(2,i,t);
-  m["shape"].set(3,i,lt);
-  m["shape"].set(4,i,r);
-  m["shape"].set(5,i,g);
-  m["shape"].set(6,i,b);
-  m["shape"].set(7,i,a);
-  m["shape"].set(8,i,x);
-  m["shape"].set(9,i,y);
-}
-
-function add_shape_rect(i,x,y,w,h,r,g,b,a)
-{
-  add_shape_pt(i++, x+0, y+0, r, g, b, a, 0, 0, 0);
-  add_shape_pt(i++, x+w, y+0, r, g, b, a, 0, 0, 0);
-  add_shape_pt(i++, x+0, y+h, r, g, b, a, 0, 0, 0);
-
-  add_shape_pt(i++, x+w, y+0, r, g, b, a, 0, 0, 0);
-  add_shape_pt(i++, x+0, y+h, r, g, b, a, 0, 0, 0);
-  add_shape_pt(i++, x+w, y+h, r, g, b, a, 0, 0, 0);
-
-  return i;
-}
-
-function add_shape_rect_corner(i,x,y,w,h,r,g,b,a,corner,lt)
-{
-/* 0 - lower left */
-/* 1 - lower right */
-/* 2 - upper left */
-/* 3 - upper right */
-  switch (corner) {
-    case 0:
-      add_shape_pt(i++, x+0, y+0, r, g, b, a, 2, -1, -1, lt);
-      add_shape_pt(i++, x+w, y+0, r, g, b, a, 2, 0, -1, lt);
-      add_shape_pt(i++, x+0, y+h, r, g, b, a, 2, -1, 0, lt);
-
-      add_shape_pt(i++, x+w, y+0, r, g, b, a, 2, 0, -1, lt);
-      add_shape_pt(i++, x+0, y+h, r, g, b, a, 2, -1, 0, lt);
-      add_shape_pt(i++, x+w, y+h, r, g, b, a, 2, 0, 0, lt);
-      break;
-    case 1:
-      add_shape_pt(i++, x+0, y+0, r, g, b, a, 2, 0, -1, lt);
-      add_shape_pt(i++, x+w, y+0, r, g, b, a, 2, 1, -1, lt);
-      add_shape_pt(i++, x+0, y+h, r, g, b, a, 2, 0, 0, lt);
-
-      add_shape_pt(i++, x+w, y+0, r, g, b, a, 2, 1, -1, lt);
-      add_shape_pt(i++, x+0, y+h, r, g, b, a, 2, 0, 0, lt);
-      add_shape_pt(i++, x+w, y+h, r, g, b, a, 2, 1, 0, lt);
-      break;
-    case 2:
-      add_shape_pt(i++, x+0, y+0, r, g, b, a, 2, -1, 0, lt);
-      add_shape_pt(i++, x+w, y+0, r, g, b, a, 2, 0, 0, lt);
-      add_shape_pt(i++, x+0, y+h, r, g, b, a, 2, -1, 1, lt);
-
-      add_shape_pt(i++, x+w, y+0, r, g, b, a, 2, 0, 0, lt);
-      add_shape_pt(i++, x+0, y+h, r, g, b, a, 2, -1, 1, lt);
-      add_shape_pt(i++, x+w, y+h, r, g, b, a, 2, 0, 1, lt);
-      break;
-    case 3:
-      add_shape_pt(i++, x+0, y+0, r, g, b, a, 2, 0, 0, lt);
-      add_shape_pt(i++, x+w, y+0, r, g, b, a, 2, 1, 0, lt);
-      add_shape_pt(i++, x+0, y+h, r, g, b, a, 2, 0, 1, lt);
-
-      add_shape_pt(i++, x+w, y+0, r, g, b, a, 2, 1, 0, lt);
-      add_shape_pt(i++, x+0, y+h, r, g, b, a, 2, 0, 1, lt);
-      add_shape_pt(i++, x+w, y+h, r, g, b, a, 2, 1, 1, lt);
-      break;
-  }
-
-  return i;
-}
-
-
-function init_gl()
-{
-  let options = { alpha: false };
-  let el = document.getElementById("canvas");
-  try { gl = el.getContext("webgl", options) } catch (e) { }
-  try { gl = gl || canvas.getContext("experimental-webgl", options); } catch(e) { }
-  if (gl == null) {
-    console.log("couldn't create GL instance");
-    return;
-  }
-  window.onresize = resize;
-  init_nk();
-  m["pix_xy"] = Matrix(Float32Array, 4, 1, [ 0, 0, 0, 1]);
-  m["gl_xy"] = Matrix(Float32Array, 4, 1, [ 0, 0, 0, 1]);
-  m["caM"] = matrix(Float32Array, 4, 4);
-  m["caM"].identity();
-  m["caM_glf"] = matrix(Float32Array, 4, 4);
-  prog["shape"] = create_prog_shape();
-  prog["glf"] = create_prog_glf();
-  m["shape"] = matrix(Float32Array, 10, 16 * 3);
-  m["glf_vbo"] = Matrix(Float32Array, 4, glf.pts.length / 4, glf.pts);
-  m["glf_vao"] = Matrix(Uint32Array, 1, glf.idx.length, glf.idx);
-  vbo["shape"] = VBO({gl: gl, m: m["shape"]});
-  vbo["glf_vbo"] = VBO({gl: gl, m: m["glf_vbo"]});
-  vbo["glf_vao"] = VBO({gl: gl, m: m["glf_vao"]});
-  prag["shape"] = create_prag_shape(m.caM._data, vbo["shape"]);
-  prag["glf"] = create_prag_glf(m.caM_glf._data, vbo["glf_vbo"]);
-
-
-  init_draw_char()
-  /*
-  window.onkeydown = keydown;
-  */
-  window.onmousemove = mousemove;
-  window.onmousedown = mousedown;
-  window.onmouseup   = mouseup;
-
-  resize();
-
-  draw_gl(); /* Kick off draw sequence */
-}
-
-function init_draw_char()
-{
-  let xmin = -203;
-  let ymin = -302;
-//let xmax = 718
-//let ymax=1098
-//height = ymax - ymin = 1400
-//width = xmax - xmin = 921
-  let scale = 0.0010857763300760044;
-
-  m["T"] = Matrix(Float32Array, 4, 4, [ 1, 0, 0, 0,
-                                            0, 1, 0, 0,
-                                            0, 0, 1,     0,
-                                           -xmin, -ymin, 0,     1 ]);
-
-  m["S"] = Matrix(Float32Array, 4, 4, [scale,     0, 0, 0,
-                                             0, scale, 0, 0,
-                                             0,     0, 1, 0,
-                                             0,     0, 0, 1 ]);
-
-  m["ST"] = matrix(Float32Array, 4, 4);
-  m["ST"].mul(m["S"], m["T"]);
-
-  m["T2"] = Matrix(Float32Array, 4, 4, [ 1, 0, 0, 0,
-                                         0, 1, 0, 0,
-                                         0, 0, 1, 0,
-                                        -1.0 + (0), 1.0 -(0), 0,   1 ]);
-
-  m["S2"] = Matrix(Float32Array, 4, 4, [ (1),     0, 0, 0,
-                                         0,     (1), 0, 0,
-                                         0,          0, 1, 0,
-                                         0,          0, 0, 1 ]);
-  m["ST2"] = matrix(Float32Array, 4, 4);
-
-}
-
-function draw_glyph(arg)
-{
-  
-  let idx = lookup_cmap_glyph(glf.cmap, arg.charCode);
-  let tab = arg.glf.lookup[idx];
-  if (tab == null) {
-    if (arg.charCode != 32) {
-      console.log("error looking up: " + arg.charCode);
-    }
-    return;
-  }
-  arg.vao.bind(arg.gl.ELEMENT_ARRAY_BUFFER);
-  const ext = gl.getExtension("OES_element_index_uint");
-  let start = tab.start;
-  let len = tab.len;
-  arg.gl.drawElements(arg.gl.TRIANGLES, len, arg.gl.UNSIGNED_INT, 4 * start);
-}
-
-function draw_char(c,x,y,w,h)
-{
-  let scale1 = 2 / (this.COLS);
-  let scale2 = 2 / (this.LINES);
-  m["pix_xy"].set(0,0,x);
-  m["pix_xy"].set(1,0,y);
-  m["gl_xy"].mul(m["caM"], m["pix_xy"]);
-  x = m["gl_xy"].get(0,0);
-  y = m["gl_xy"].get(1,0);
-  let scalex = m["caM"].get(0,0);
-  let scaley = m["caM"].get(1,1);
-  w = scalex * w;
-  h = -scaley * h;
-  m["T2"].set(0, 3, x);
-  m["T2"].set(1, 3, y);
-  m["S2"].set(0, 0, w);
-  m["S2"].set(1, 1, h);
-  m["ST2"].mul(m["T2"], m["S2"]);
-  m["caM_glf"].mul(m["ST2"], m["ST"]);
-  prag["glf"].run(prog["glf"], draw_glyph, { gl: gl, vao: vbo["glf_vao"], glf: glf, charCode: c });
-}
-
-function reset_draw_stack()
-{
-  let keys = [ "rect", "rect_filled", "scissor", "text", "circle_filled", "triangle_filled" ];
+  let keys = Object.keys(fxs);
   for (let i=0; i<keys.length; i++) {
     let key = keys[i];
-    draw_stack[key] = [];
-    draw_stack["tri_pt_count"] = 3;
+    import_object.env[key] = fxs[key];
+    console.log(key, fxs[key]);
   }
 }
 
-function draw_shape(n)
-{
-  gl.drawArrays(gl.TRIANGLES, 0, n);
+let memory_grow = function(npages) {
+  g.wasm_memory.grow(npages);
+  g.memory = new Uint8Array(g.wasm_memory.buffer);
 }
 
-function draw_gl()
+function main()
 {
-  let starttime = Date.now();
-  gl.clearColor(bg.r, bg.g, bg.b, bg.a);
-  gl.clear(gl.COLOR_BUFFER_BIT + gl.DEPTH_BUFFER_BIT);
-  wasm.instance.exports.nk_rect(nuklear.rect, 50, 50, 230, 250);
-  wasm.instance.exports.nk_input_begin(nuklear.ctx);
-  for (let i=0; i<input.length; i++) {
-    let fn = input[i][0];
-    let fn_arg = input[i][1];
-    fn(...fn_arg);
-  }
-  wasm.instance.exports.nk_input_end(nuklear.ctx);
-  if (wasm.instance.exports.nk_begin(nuklear.ctx, nuklear.s.Demo, nuklear.rect, 87)) {
-  //if (wasm.instance.exports.nk_wasm_begin(nuklear.ctx, nuklear.s.Demo, 50.0, 50.0, 230.0, 250.0, 87)) {
+  let sysjs       = g.modules["./sys.js"].sysjs(g);
+  g.handler       = g.modules["./handler.js"].handler();
+  g.gl            = g.modules["./gl.js"].gl("canvas");
+  g.glf_json      = g.modules["./IntelOneMono-Regular.glf.js"].IntelOneMono_Regular;
+  g.matrix        = g.modules["./matrix.js"].matrix;
+  g.Matrix        = g.modules["./matrix.js"].Matrix;
+  g.Program       = g.modules["./program.js"].Program;
+  g.Prag          = g.modules["./prag.js"].Prag;
+  g.VBO           = g.modules["./vbo.js"].VBO;
+  g.glf           = g.modules["./glf.js"].glf(g.glf_json, g);
+  g.nuklear       = g.modules["./nuklear.js"].nuklear(g);
 
-    wasm.instance.exports.nk_layout_row_static(nuklear.ctx, 30, 80, 1);
-    if (wasm.instance.exports.nk_button_label(nuklear.ctx, nuklear.s.button)) {
-      console.log("button pressed");
+  let memory      = new WebAssembly.Memory({ initial: 5, maximum: 1000, shared: true });
+  const import_object= {
+    js: { mem: memory },
+    env: {
+      memory:     memory,
+      memoryBase: 0,
     }
+  };
+  add_fxs(import_object, sysjs);
+  add_fxs(import_object, g.nuklear.nk_fxs);
 
-    wasm.instance.exports.nk_layout_row_dynamic(nuklear.ctx, 30, 2);
-    if (wasm.instance.exports.nk_option_label(nuklear.ctx, nuklear.s.easy, nuklear.op == 1)) { nuklear.op = 1; }
-    if (wasm.instance.exports.nk_option_label(nuklear.ctx, nuklear.s.hard, nuklear.op == 2)) { nuklear.op = 2; }
+  g.handler.subscribe(g.gl,      "resize");
 
-    wasm.instance.exports.nk_layout_row_dynamic(nuklear.ctx, 25, 1);
-    wasm.instance.exports.nk_property_int(nuklear.ctx, nuklear.s.Compression, 0, nuklear.property, 100, 10, 1);
+  g.handler.subscribe(g.nuklear, "mousemove");
+  g.handler.subscribe(g.nuklear, "mousedown");
+  g.handler.subscribe(g.nuklear, "mouseup");
 
+  g.gl.subscribe(g.glf,     "init");
+  /*g.gl.subscribe(g.glf,     "display");*/
+  g.gl.subscribe(g.glf,     "resize");
+  g.gl.subscribe(g.nuklear, "resize");
 
-  }
-  wasm.instance.exports.nk_end(nuklear.ctx);
-  wasm.instance.exports.nk_wasm_draw_calculator(nuklear.ctx);
-  wasm.instance.exports.nk_wasm_draw_overview(nuklear.ctx);
-  wasm.instance.exports.nk_wasm_draw_canvas(nuklear.ctx);
-  wasm.instance.exports.nk_wasm_draw_node_editor(nuklear.ctx);
-  reset_draw_stack();
-  gl.disable(gl.SCISSOR_TEST);
-  wasm.instance.exports.nk_wasm_draw(nuklear.ctx);
-  //console.log({draw_stack});
-  input = [];
-  let duration = Date.now() - starttime;
-  let frame_len = 1000 / 60; /* ms per from at 60fps */
-  setTimeout(draw_gl, frame_len - duration);
+  g.gl.subscribe(g.nuklear, "init");
+  g.gl.subscribe(g.nuklear, "display");
+
+  g.import_object = import_object;
+
+  WebAssembly.instantiateStreaming(
+    fetch(g.dataurls["./nuklear.wasm"]),
+    import_object).then(
+      function (obj) {
+        g.wasm = obj;
+        g.wasm_memory = obj.instance.exports.memory;
+        g.memory = new Uint8Array(g.wasm_memory.buffer);
+        g.memory_grow = memory_grow;
+        g.nuklear.wasm = obj;
+        g.gl.init();
+    }
+  )
 }
 
-function start()
+function start_check()
 {
-  if (document_done && wasm_done) {
-    init_gl();
+  if (g.modules_i == g.modules_n && g.dataurls_i == g.dataurls_n) {
+    g.finished_cb();
   }
 }
 
-function malloc_int(i32)
+function require(filename)
 {
-  let res = wasm.instance.exports.my_malloc(i32);
-  console.log(res);
-  return res;
+  let require_cb = function(text)
+  {
+    let module = { exports: { } };
+	  console.log(filename)
+    eval(text);
+    g.modules[filename] = module.exports;
+    g.modules_i++;
+    start_check();
+  };
+  if (g.is_staging) {
+    fetch(filename).then(function(resp) { return resp.text(); }).then(require_cb);
+  } else {
+    g.tar_hash[filename].text().then(require_cb);
+  }
 }
 
-function malloc_int_old(i32)
+function requires(filenames)
 {
-  if (tail == 0) {
-    tail = memory.length;
+  let n = filenames.length;
+  g.modules_n = n;
+  for (let i=0; i<n; i++) {
+    require(filenames[i]);
   }
-  let memadd  = 5;
-  let memsize = i32 + memadd;
-  let off = (tail - memsize) % 32;
-  off = (off + 5) % 32;
-  memsize += off;
-  tail = tail - memsize;
-
-  memory[tail + 4] = (memsize / (1 << 24)) % 256;
-  memory[tail + 3] = (memsize / (1 << 16)) % 256;
-  memory[tail + 2] = (memsize / (1 <<  8)) % 256;
-  memory[tail + 1] = (memsize / (1 <<  0)) % 256;
-  memory[tail + 0] = 1;
-
-  console.log((tail + memadd) % 32);
-  
-  return tail + memadd;
 }
 
-function str_c(data)
+function dataurl(filename)
 {
-  let s = "";
-  let i = 0;
-  while (memory[data + i] != 0) {
-    s += String.fromCharCode(memory[data + i]);
-    i++;
+  let dataurl_cb = function(blob)
+  {
+    let reader = new FileReader();
+    reader.onload = function (e) {
+        let url = e.target.result;
+        if (url.substr(0,29) == "data:application/octet-stream") {
+          let tmp = url.substr(29);
+          url = "data:application/wasm" + tmp;
+	}
+        console.log(url);
+        g.dataurls[filename] = url;
+        g.dataurls_i++;
+        start_check();
+    }
+    reader.readAsDataURL(blob);
+  };
+  if (g.is_staging) {
+    fetch(filename).then(function(resp) { return resp.blob(); }).then(dataurl_cb);
+  } else {
+    dataurl_cb(g.tar_hash[filename]);
   }
-  return s;
 }
 
-function c_str(s)
+function dataurls(filenames)
 {
-  let data = malloc_int(s.length + 1);
-  for (let i=0; i<s.length; i++) {
-    memory[data + i] = s.charCodeAt(i);
+  let n = filenames.length;
+  g.dataurls_n = n;
+  for (let i=0; i<n; i++) {
+    dataurl(filenames[i]);
   }
-  memory[data + s.length] = 0;
-  return data;
 }
 
-const importObject = {
-  env: {
-    memory: new WebAssembly.Memory({ initial: 10, maximum: 32, shared: true }),
-    memoryBase: 0,
-    __assert_fail: function(i32_1, i32_2, i32_3, i32_4) {
-      console.log("__assert_fail(" + i32_1 + "," + i32_2 + "," + i32_3 + "," + i32_4 + ")");
-      let assertion = str_c(i32_1);
-      let file = str_c(i32_2);
-      let line = i32_3;
-      let func = str_c(i32_4);
-      console.error(file + ":" + line + ":" + func + ":" + assertion);
-      throw new Error("assert_fail");
-    },
-    atof: function(i32_1) {
-      s = str_c(i32_1);
-      //console.log("atof(" + i32_1 + "):" + s + "=" + Number(s));
-      return Number(s);
-    },
-    time: function(i32) {
-      console.log("time");
-      return BigInt(Math.floor(Date.now()/1000));
-    },
-    cos (f32) {
-      let ret = Math.cos(f32);
-      console.log("cos(" + f32 + ") = " + ret);
-      return ret;
-    },
-    sin (f32) {
-      let ret = Math.sin(f32);
-      console.log("sin(" + f32 + ") = " + ret);
-      return ret;
-    },
-    fmod (f32_1, f32_2) {
-      let ret = f32_1 % f32_2;
-      console.log("fmod(" + f32_1 + "," + f32_2 + ") = " + ret);
-      return ret;
-    },
-    localtime: function (i32) {
-      console.log("localtime");
-      let data = malloc_int(9 * 4);
-      let dt = new Date();
-      let sec = dt.getSeconds();
-      let min = dt.getMinutes();
-      let hour = dt.getHours();
-      let mday = dt.getDate();
-      let mon = dt.getMonth();
-      let year = dt.getFullYear() - 1900;
-      let wday = dt.getDay();
-      let yday = 1;
-      let is_dst = 0;
-      let vals = [ sec, min, hour, mday, mon, year, wday, yday, is_dst ];
+function gunzip(response)
+{
+    return response.body.pipeThrough(new DecompressionStream("gzip"));
+}
+
+function untar(stream)
+{
+    return new Response(stream).blob();
+}
+
+function unblob(blob)
+{
+    tar = new tarball.TarReader();
+    return tar.readFile(blob);
+
+}
+
+function tar_hash(tar_array)
+{
+    for (let i=0; i<tar_array.length; i++) {
+        let filename = tar_array[i].name;
+        g.tar_hash[filename] = tar.getFileBlob(filename);
+    }
+    run();
+}
 
 
-      for (let i=0; i<9; i++) {
-        let val = vals[i];
-        memory[data + 4 * i + 3] = 0;
-        memory[data + 4 * i + 2] = 0;
-        memory[data + 4 * i + 1] = val / 256;
-        memory[data + 4 * i + 0] = val % 256;
-      }
-      return data;
-    },
-    sprintf: function(i32_1, i32_2, i32_3) {
-      console.log("sprintf(" + i32_1 + "," + i32_2 + "," + i32_3 + ")");
-      let s = s_from_printf(i32_2, i32_3);
-      let dst = i32_1;
-      let n = s.length;
-      for (let i=0; i<n; i++) {
-        memory[dst + i] = s.charCodeAt(i);
-      }
-      memory[dst + n] = 0;
-      
-      console.log("sprintf(" + i32_1 + "," + i32_2 + "," + i32_3 + ")", s);
-      return n;
-    },
-    snprintf: function(i32_1, i32_2, i32_3, i32_4) {
-      let s = s_from_printf(i32_3, i32_4);
-      let n = i32_2;
-      let dst = i32_1;
-      if (s.length == n) {
-        n--;
-      } else if (s.length < n) {
-        n = s.length;
-      }
-      for (let i=0; i<n; i++) {
-        memory[dst + i] = s.charCodeAt(i);
-      }
-      memory[dst + n] = 0;
-      //console.log("snprintf(" + i32_1 + "," + i32_2 + "," + i32_3 + "," + i32_4 + ")", s);
-      return n;
-    },
-    vsnprintf: function (i32_1, i32_2, i32_3, i32_4) {
-      console.log("vsnprintf(" + i32_1 + "," + i32_2 + "," + i32_3 + "," + i32_4 + ")");
-      let s = s_from_printf(i32_3, i32_4);
-      let n = i32_2;
-      let dst = i32_1;
-      if (s.length == n) {
-        n--;
-      } else if (s.length < n) {
-        n = s.length;
-      }
-      for (let i=0; i<n; i++) {
-        memory[dst + i] = s.charCodeAt(i);
-      }
-      memory[dst + n] = 0;
-      
-      console.log("vsnprintf(" + i32_1 + "," + i32_2 + "," + i32_3 + "," + i32_4 + ")", s);
-      return n;
-    },
-    malloc: function (i32) {
-      console.log("malloc(" + i32 + ")");
-      return malloc_int(i32);
-    },
-    free: function(i32) {
-	/*
-      console.log("free(" + i32 + ")");
-      let ptr = i32 - 5;
-      memory[ptr] = 0;
-      while (memory[tail] == 0 && tail < memory.length) {
-        let n = (1 << 24) * memory[tail + 4] +
-                (1 << 16) * memory[tail + 3] +
-                (1 <<  8) * memory[tail + 2] +
-                (1 <<  0) * memory[tail + 1];
-        tail = tail + n;
-      }
-	*/
-    },
-    memset: function(i32_1, i32_2, i32_3) {
-      console.log("memset(" + i32_1 + "," + i32_2 + "," + i32_3 + ")");
-      let dst = i32_1;
-      let val = i32_2;
-      let n = i32_3;
-      for (let i=0; i<n; i++) {
-        memory[dst + i] = val;
-      }
-      return dst;
-    },
-    memcpy: function(i32_1, i32_2, i32_3) {
-      console.log("memcpy(" + i32_1 + "," + i32_2 + "," + i32_3 + ")");
-      let dst = i32_1;
-      let src = i32_2;
-      let n = i32_3;
-      for (let i=0; i<n; i++) {
-        memory[dst + i] = memory[src + i];
-      }
-      return dst;
-    },
-    strcpy: function (i32_1, i32_2) { 
-      console.log("strcpy(" + i32_1 + "," + i32_2 + ")");
-      let dst = i32_1;
-      let src = i32_2;
-      let i = 0;
-      let s = "";
-      while (memory[src + i] != 0) {
-        memory[dst + i] = memory[src + i];
-	s += String.fromCharCode(memory[src + i]);
-	i++;
-      }
-      memory[dst + i] = 0;
-      console.log(s);
-      return dst;
-    },
-    printf: function (i32_1, i32_2) {
-      console.log("printf(" + i32_1 + "," + i32_2 + ")");
-      let s = s_from_printf(i32_1, i32_2);
-      console.log(s);
-      return s.length;
-    },
-    fprintf: function (i32_1, i32_2, i32_3) {
-      console.log("fprintf(" + i32_1 + "," + i32_2 + "," + i32_3 + ")");
-      s = s_from_printf(i32_2, i32_3);
-      console.log(i32_1, s);
-      return s.length;
-    },
-    nk_wasm_command_scissor: function(i32_1, i32_2, i32_3, i32_4) {
-      let x = i32_1;
-      let y = i32_2;
-      let w = i32_3;
-      let h = i32_4;
-	/* This doesn't send a clear signal.
-	 * If remains enabled it screws up the button rendering
-      gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(x,y,w,h);
-	*/
-      draw_stack["scissor"].push({x,y,w,h});
-    },
-    nk_wasm_command_line: function(i32_1,i32_2,i32_3,i32_4,i32_5,i32_6) {
-      let line_thickness = i32_1;
-      let x0 = i32_2;
-      let y0 = i32_3;
-      let x1 = i32_4;
-      let y1 = i32_5;
-      let nk_color = i32_6;
-      let r = wasm.instance.exports.nk_color_r(nk_color);
-      let g = wasm.instance.exports.nk_color_g(nk_color);
-      let b = wasm.instance.exports.nk_color_b(nk_color);
-      let a = wasm.instance.exports.nk_color_a(nk_color);
-      let lt = line_thickness;
-      let off = lt / 2.0;
-      let i = 0;
-      if (x0 == x1) {
-        add_shape_rect(i, x0 - off    , y0, lt, y1 - y0, r, g, b, a);
-      } else if (y0 == y1) {
-        add_shape_rect(i, x0, y0 - off, x1, lt, r, g, b, a);
-      } else {
-        console.log("Unhandled diagonal line");
-      }
-      
-      vbo["shape"].reload();
-      prag["shape"].run(prog["shape"], draw_shape, i);
-    },
-    nk_wasm_command_curve: function(i32) { console.log(" nk_wasm_command_curve"); },
-    nk_wasm_command_rect: function(i32_1, i32_2, i32_3, i32_4, i32_5, i32_6, i32_7) {
-      let rounding = i32_1;
-      let line_thickness = i32_2;
-      let x = i32_3;
-      let y = i32_4;
-      let w = i32_5;
-      let h = i32_6;
-      let nk_color = i32_7;
-      let r = wasm.instance.exports.nk_color_r(nk_color);
-      let g = wasm.instance.exports.nk_color_g(nk_color);
-      let b = wasm.instance.exports.nk_color_b(nk_color);
-      let a = wasm.instance.exports.nk_color_a(nk_color);
-      if (line_thickness == 0) {
-        return;
-      }
-      let i = 0;
-      let lt = line_thickness;
-      let rn = rounding;
-      let off = lt / 2.0;
-        i = add_shape_rect(i, x - off, y + rn, lt, h - 2 * rn, r, g, b, a);
-        i = add_shape_rect(i, x + w - off, y + rn, lt, h - 2 * rn, r, g, b, a);
-
-        i = add_shape_rect(i, x + rn, y - off, w - 2 * rn, lt, r, g, b, a);
-        i = add_shape_rect(i, x + rn, y + h - off, w - 2 * rn, lt, r, g, b, a);
-      if (rn == 0) {
-        i = add_shape_rect(i, x - off    , y - off, lt, lt, r, g, b, a);
-        i = add_shape_rect(i, x + w - off, y - off, lt, lt, r, g, b, a);
-
-        i = add_shape_rect(i, x - off    , y + h - off, lt, lt, r, g, b, a);
-        i = add_shape_rect(i, x + w - off, y + h - off, lt, lt, r, g, b, a);
-      } else {
-        /* 0 - lower left */
-        /* 1 - lower right */
-        /* 2 - upper left */
-        /* 3 - upper right */
-        let frag_lt = lt / (lt + rn);
-        i = add_shape_rect_corner(i, x - off    , y - off, lt + rn, lt + rn, r, g, b, a, 0, frag_lt);
-        i = add_shape_rect_corner(i, x + w - off - rn, y - off, lt + rn, lt + rn, r, g, b, a, 1, frag_lt);
-
-        i = add_shape_rect_corner(i, x - off    , y + h - off - rn, lt + rn, lt + rn, r, g, b, a, 2, frag_lt);
-        i = add_shape_rect_corner(i, x + w - off - rn, y + h - off - rn, lt + rn, lt + rn, r, g, b, a, 3, frag_lt);
-      }
-      draw_stack["rect"].push({x,y,w,h,rounding,line_thickness,r,g,b,a});
-      vbo["shape"].reload();
-      prag["shape"].run(prog["shape"], draw_shape, i);
-    },
-    nk_wasm_command_rect_filled: function(i32_1, i32_2, i32_3, i32_4, i32_5, i32_6) {
-      let rounding = i32_1;
-      let x = i32_2;
-      let y = i32_3;
-      let w = i32_4;
-      let h = i32_5;
-      let nk_color = i32_6;
-      let r = wasm.instance.exports.nk_color_r(nk_color);
-      let g = wasm.instance.exports.nk_color_g(nk_color);
-      let b = wasm.instance.exports.nk_color_b(nk_color);
-      let a = wasm.instance.exports.nk_color_a(nk_color);
-      let i = 0;
-      if (rounding == 0) {
-        i = add_shape_rect(i, x, y, w, h, r, g, b, a);
-      } else {
-        let o = rounding;
-        i = add_shape_rect(i, x + o, y + 0, w - 2 * o, o        , r, g, b, a);
-        i = add_shape_rect(i, x + 0, y + o, w        , h - 2 * o, r, g, b, a);
-        i = add_shape_rect(i, x + o, y + h - o, w - 2 * o, o        , r, g, b, a);
-
-        add_shape_pt(i++, x+o, y+0, r, g, b, a, 1, 0, -1);
-        add_shape_pt(i++, x+0, y+o, r, g, b, a, 1, -1, 0);
-        add_shape_pt(i++, x+o, y+o, r, g, b, a, 1, 0, 0);
-
-        add_shape_pt(i++, x+w-o, y+0, r, g, b, a, 1, 0, -1);
-        add_shape_pt(i++, x+w, y+o, r, g, b, a, 1, 1, 0);
-        add_shape_pt(i++, x+w-o, y+o, r, g, b, a, 1, 0, 0);
-
-        add_shape_pt(i++, x+o, y+h, r, g, b, a, 1, 0, 1);
-        add_shape_pt(i++, x+0, y+h-o, r, g, b, a, 1, -1, 0);
-        add_shape_pt(i++, x+o, y+h-o, r, g, b, a, 1, 0, 0);
-
-        add_shape_pt(i++, x+w-o, y+h, r, g, b, a, 1, 0, 1);
-        add_shape_pt(i++, x+w, y+h-o, r, g, b, a, 1, 1, 0);
-        add_shape_pt(i++, x+w-o, y+h-o, r, g, b, a, 1, 0, 0);
-
-      }
-      vbo["shape"].reload();
-      prag["shape"].run(prog["shape"], draw_shape, i);
-    },
-    nk_wasm_command_rect_multi_color: function(i32_1, i32_2, i32_3, i32_4, i32_5, i32_6, i32_7, i32_8) {
-      let x = i32_1;
-      let y = i32_2;
-      let w = i32_3;
-      let h = i32_4;
-      let nk_color_left = i32_5;
-      let nk_color_top = i32_6;
-      let nk_color_right = i32_7;
-      let nk_color_bottom = i32_8;
-
-      let l_r = wasm.instance.exports.nk_color_r(nk_color_left);
-      let l_g = wasm.instance.exports.nk_color_g(nk_color_left);
-      let l_b = wasm.instance.exports.nk_color_b(nk_color_left);
-      let l_a = wasm.instance.exports.nk_color_a(nk_color_left);
-
-      let t_r = wasm.instance.exports.nk_color_r(nk_color_top);
-      let t_g = wasm.instance.exports.nk_color_g(nk_color_top);
-      let t_b = wasm.instance.exports.nk_color_b(nk_color_top);
-      let t_a = wasm.instance.exports.nk_color_a(nk_color_top);
-
-      let r_r = wasm.instance.exports.nk_color_r(nk_color_right);
-      let r_g = wasm.instance.exports.nk_color_g(nk_color_right);
-      let r_b = wasm.instance.exports.nk_color_b(nk_color_right);
-      let r_a = wasm.instance.exports.nk_color_a(nk_color_right);
-
-      let b_r = wasm.instance.exports.nk_color_r(nk_color_bottom);
-      let b_g = wasm.instance.exports.nk_color_g(nk_color_bottom);
-      let b_b = wasm.instance.exports.nk_color_b(nk_color_bottom);
-      let b_a = wasm.instance.exports.nk_color_a(nk_color_bottom);
-
-console.log({l_r,l_g,l_b,l_a});
-console.log({t_r,t_g,t_b,t_a});
-console.log({r_r,r_g,r_b,r_a});
-console.log({b_r,b_g,b_b,b_a});
-
-      let i = 0;
-	    /* x,y = left
-	       x+w,y = top
-	       x+w,y+h = right
-	       x,y+h = bottom
-	    */
-
-      add_shape_pt(i++, x+0, y+0, l_r, l_g, l_b, l_a, 0, 0, 0);
-      add_shape_pt(i++, x+w, y+0, t_r, t_g, t_b, t_a, 0, 0, 0);
-      add_shape_pt(i++, x+0, y+h, b_r, b_g, b_b, b_a, 0, 0, 0);
-
-      add_shape_pt(i++, x+w, y+0, t_r, t_g, t_b, t_a, 0, 0, 0);
-      add_shape_pt(i++, x+0, y+h, b_r, b_g, b_b, b_a, 0, 0, 0);
-      add_shape_pt(i++, x+w, y+h, r_r, r_g, r_b, r_a, 0, 0, 0);
-
-      vbo["shape"].reload();
-      prag["shape"].run(prog["shape"], draw_shape, i);
-    },
-    nk_wasm_command_circle: function(i32) { console.log(" nk_wasm_command_circle"); },
-    nk_wasm_command_circle_filled: function(i32_1, i32_2, i32_3, i32_4, i32_5) {
-      let x = i32_1;
-      let y = i32_2;
-      let w = i32_3;
-      let h = i32_4;
-      let color = i32_5;
-      let r = wasm.instance.exports.nk_color_r(color);
-      let g = wasm.instance.exports.nk_color_g(color);
-      let b = wasm.instance.exports.nk_color_b(color);
-      let a = wasm.instance.exports.nk_color_a(color);
-
-      let i = 0;
-
-      add_shape_pt(i++, x+0, y+0, r, g, b, a, 1.0, -1.0, -1.0);
-      add_shape_pt(i++, x+w, y+0, r, g, b, a, 1.0,  1.0, -1.0);
-      add_shape_pt(i++, x+0, y+h, r, g, b, a, 1.0, -1.0,  1.0);
-
-      add_shape_pt(i++, x+w, y+0, r, g, b, a, 1.0,  1.0, -1.0);
-      add_shape_pt(i++, x+0, y+h, r, g, b, a, 1.0, -1.0,  1.0);
-      add_shape_pt(i++, x+w, y+h, r, g, b, a, 1.0,  1.0,  1.0);
-
-      vbo["shape"].reload();
-      prag["shape"].run(prog["shape"], draw_shape, i);
-    },
-    nk_wasm_command_arc: function(i32) { console.log(" nk_wasm_command_arc"); },
-    nk_wasm_command_arc_filled: function(i32) { console.log(" nk_wasm_command_arc_filled"); },
-    nk_wasm_command_triangle: function(i32) { console.log(" nk_wasm_command_triangle"); },
-    nk_wasm_command_triangle_filled: function(i32_1, i32_2, i32_3, i32_4, i32_5, i32_6, i32_7) {
-      let x0 = i32_1;
-      let y0 = i32_2;
-      let x1 = i32_3;
-      let y1 = i32_4;
-      let x2 = i32_5;
-      let y2 = i32_6;
-      let color = i32_7;
-      let r = wasm.instance.exports.nk_color_r(color);
-      let g = wasm.instance.exports.nk_color_g(color);
-      let b = wasm.instance.exports.nk_color_b(color);
-      let a = wasm.instance.exports.nk_color_a(color);
-
-      let i = 0;
-      add_shape_pt(i++, x0, y0, r, g, b, a, 0, 0, 0);
-      add_shape_pt(i++, x1, y1, r, g, b, a, 0, 0, 0);
-      add_shape_pt(i++, x2, y2, r, g, b, a, 0, 0, 0);
-      vbo["shape"].reload();
-      prag["shape"].run(prog["shape"], draw_shape, i);
-    },
-    nk_wasm_command_polygon: function(i32) { console.log(" nk_wasm_command_polygon"); },
-    nk_wasm_command_polygon_filled: function(i32) { console.log(" nk_wasm_command_polygon_filled"); },
-    nk_wasm_command_polyline: function(i32) { console.log(" nk_wasm_command_polyline"); },
-    nk_wasm_command_text: function(i32_1, i32_2, i32_3, i32_4, i32_5, i32_6, i32_7, i32_8, i32_9, i32_10, i32_11) {
-      let font = i32_1;
-      let bgcolor = i32_2;
-      let fgcolor = i32_3;
-      let r = wasm.instance.exports.nk_color_r(fgcolor);
-      let g = wasm.instance.exports.nk_color_g(fgcolor);
-      let b = wasm.instance.exports.nk_color_b(fgcolor);
-      let a = wasm.instance.exports.nk_color_a(fgcolor);
-      let x = i32_4;
-      let y = i32_5;
-      let w = i32_6;
-      let h = i32_7;
-      let height = i32_8;
-      let length = i32_9;
-      let s = str_c(i32_10);
-      let char_width = height * 0.657;
-      //let char_width = height * 0.5;
-      let calc_width = char_width * length;
-      for (let i=0; i<length; i++) {
-        draw_char(s.charCodeAt(i), x + i*char_width, y + 1.2*height, char_width, height);
-      }
-    },
-    nk_wasm_command_image: function(i32) { console.log(" nk_wasm_command_image"); },
-    nk_wasm_command_custom: function(i32) { console.log(" nk_wasm_command_custom"); },
-  }
-};
-
-WebAssembly.instantiateStreaming(fetch(
-"nuklear.wasm"
-), importObject).then(
-  function (obj) {
-    memory = new Uint8Array(obj.instance.exports.memory.buffer);
-    wasm = obj;
-    wasm_done = true;
-    start();
-  }
+function start() {
+  if (!g.is_staging) {
+  fetch(
+"manifest.tar.gz"
 )
-
-</script>
-<script src="IntelMono-glf.js">
+    .then(gunzip)
+    .then(untar)
+    .then(unblob)
+    .then(tar_hash)
+  } else {
+    run();
+  }
+}
 </script>
 </head>
 <body>
 <canvas id="canvas" style="position: absolute; right: 0px; bottom: 0px;">
 </canvas>
+<div id="target">
 <script>
 /* window.onload doesn't work as expected on mobile.
  * workaround by executing this at end */
-document_done = true;
 start();
 </script>
+</div>
 </body>
 </html>

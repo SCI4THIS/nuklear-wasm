@@ -305,3 +305,6 @@ function Matrix(type, n, m, arr)
   return mat
 }
 
+
+module.exports.matrix = matrix;
+module.exports.Matrix = Matrix;

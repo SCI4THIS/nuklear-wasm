@@ -1,18 +1,24 @@
 #!/bin/bash
 
-echo "\"data:application/wasm;base64,`base64 --wrap=0 src/nuklear.wasm`\"" > nuklear.wasm.b64
+mkdir -p tar-staging
 
-sed -f amalgamate_program.sed src/index.html > tmp1.js
-sed -f amalgamate_prag.sed tmp1.js > tmp2.js
-sed -f amalgamate_vbo.sed tmp2.js > tmp3.js
-sed -f amalgamate_matrix.sed tmp3.js > tmp4.js
-sed -f amalgamate_intelmono.sed tmp4.js > tmp5.js
-sed -f amalgamate_wasm.sed tmp5.js > tmp6.js
+for file in "prag.js" "vbo.js" "matrix.js" "IntelOneMono-Regular.glf.js" "nuklear.wasm" "sys.js" "gl.js" "program.js" "glf.js" "nuklear.js" "handler.js"
+do
+  cp src/${file} tar-staging/${file}
+done
 
-mv tmp6.js index.html
-rm tmp5.js
-rm tmp4.js
-rm tmp3.js
+tar -czvf src/manifest.tar.gz -C tar-staging/ .
+
+cp tarballjs/tarball.js src/tarball.js
+
+echo "\"data:application/wasm;base64,`base64 --wrap=0 src/manifest.tar.gz`\"" > manifest.tar.gz.b64
+
+sed -f amalgamate_tarballjs.sed src/index.html > tmp1.js
+sed -f amalgamate_manifest.tar.gz.sed tmp1.js > tmp2.js
+sed s/is_staging\:\ true/is_staging\:\ false/g tmp2.js > tmp3.js
+
+mv tmp3.js index.html
 rm tmp2.js
 rm tmp1.js
-rm nuklear.wasm.b64
+rm manifest.tar.gz.b64
+rm src/manifest.tar.gz
