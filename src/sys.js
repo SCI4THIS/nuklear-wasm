@@ -1,8 +1,8 @@
 
 let sysjs = function (g) {
 
-let DEBUG_FUNCTION_PRINTS = true;
-let DEBUG_REALLOC         = true;
+let DEBUG_FUNCTION_PRINTS = false;
+let DEBUG_REALLOC         = false;
 let wasm3_proto           = { };
 
 /* UTILITY */
@@ -582,7 +582,6 @@ let malloc = function(i32_1) {
     g.memory_end = g.memory.length;
   }
   g.memory_allocd[off] = size;
-  console.log("returning: ", off)
   return off;
 };
 

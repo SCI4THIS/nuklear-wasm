@@ -1,3 +1,14 @@
+let keydown = function(e)
+{
+  console.log(e);
+  window.handler_obj.publish("keydown", { key: e.key });
+}
+
+let keyup = function(e)
+{
+  window.handler_obj.publish("keyup", { key: e.key });
+}
+
 let mousemove = function(e)
 {
   window.handler_obj.publish("mousemove", { x: e.clientX, y: e.clientY });
@@ -44,6 +55,8 @@ function handler()
   window.onmousedown = mousedown;
   window.onmouseup   = mouseup;
   window.onresize    = resize;
+  window.onkeydown   = keydown;
+  window.onkeyup     = keyup;
   return obj;
 }
 

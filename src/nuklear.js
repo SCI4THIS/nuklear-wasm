@@ -191,6 +191,70 @@ let queue_display = function()
   }
 }
 
+let keyup = function({key})
+{
+}
+
+let keydown = function({key})
+{
+  if (key.length == 1) {
+    this.input.push([ this.wasm.instance.exports.nk_input_char, [this.nk.ctx, key.charCodeAt(0) ]]);
+  } else {
+    let nk_key = -1;
+    if (key == "Backspace") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_BACKSPACE);
+    }
+    if (key == "ArrowLeft") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_LEFT);
+    }
+    if (key == "ArrowRight") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_RIGHT);
+    }
+    if (key == "Enter") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_ENTER);
+    }
+    if (key == "Delete") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_DEL);
+    }
+    if (key == "ArrowUp") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_UP);
+    }
+    if (key == "ArrowDown") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_DOWN);
+    }
+    if (key == "Tab") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_TAB);
+    }
+    if (key == "Home") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_TEXT_START);
+      this.input.push([ this.wasm.instance.exports.nk_input_key, [this.nk.ctx, nk_key, 1 ]]);
+      this.input.push([ this.wasm.instance.exports.nk_input_key, [this.nk.ctx, nk_key, 0 ]]);
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_SCROLL_START);
+    }
+    if (key == "End") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_TEXT_END);
+      this.input.push([ this.wasm.instance.exports.nk_input_key, [this.nk.ctx, nk_key, 1 ]]);
+      this.input.push([ this.wasm.instance.exports.nk_input_key, [this.nk.ctx, nk_key, 0 ]]);
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_SCROLL_END);
+    }
+    if (key == "PageUp") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_SCROLL_UP);
+    }
+    if (key == "PageDown") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_SCROLL_DOWN);
+    }
+    if (key == "Shift") {
+      nk_key = this.wasm.instance.exports.nk_key_lookup(this.nk.s.NK_KEY_SHIFT);
+    }
+    if (nk_key == -1) {
+      return;
+    }
+    this.input.push([ this.wasm.instance.exports.nk_input_key, [this.nk.ctx, nk_key, 1 ]]);
+    this.input.push([ this.wasm.instance.exports.nk_input_key, [this.nk.ctx, nk_key, 0 ]]);
+  }
+  this.queue_display(); 
+}
+
 let mousemove = function({x,y})
 {
   this.input.push([ this.wasm.instance.exports.nk_input_motion, [this.nk.ctx, x, y ]]);
@@ -213,6 +277,8 @@ let mouseup = function({x,y,button})
 
 function resize({width, height})
 {
+  this.width = width;
+  this.height = height;
   this.m.caM.set(0, 0, 2 / width);
   this.m.caM.set(1, 1, -2 / height);
   this.m.caM.set(0, 3, -1.0);
@@ -231,8 +297,8 @@ function init(gl)
   this.prag = this.create_prag_shape(this.m.caM._data, this.vbo);
   this.prog = this.create_prog_shape();
 
-  //const malloc = g.import_object.env.malloc;
-  const malloc = this.wasm.instance.exports.my_malloc;
+  const malloc = g.import_object.env.malloc;
+  //const malloc = this.wasm.instance.exports.my_malloc;
   const str_c  = g.import_object.env.str_c;
   const c_str  = g.import_object.env.c_str;
 
@@ -251,9 +317,24 @@ function init(gl)
     R: c_str("#R:"),
     G: c_str("#G:"),
     B: c_str("#B:"),
-    A: c_str("#A:")
+    A: c_str("#A:"),
+    NK_KEY_BACKSPACE: c_str("NK_KEY_BACKSPACE"),
+    NK_KEY_RIGHT: c_str("NK_KEY_RIGHT"),
+    NK_KEY_LEFT: c_str("NK_KEY_LEFT"),
+    NK_KEY_ENTER: c_str("NK_KEY_ENTER"),
+    NK_KEY_DEL: c_str("NK_KEY_DEL"),
+    NK_KEY_UP: c_str("NK_KEY_UP"),
+    NK_KEY_DOWN: c_str("NK_KEY_DOWN"),
+    NK_KEY_TAB: c_str("NK_KEY_TAB"),
+    NK_KEY_TEXT_START: c_str("NK_KEY_TEXT_START"),
+    NK_KEY_SCROLL_START: c_str("NK_KEY_SCROLL_START"),
+    NK_KEY_TEXT_END: c_str("NK_KEY_TEXT_END"),
+    NK_KEY_SCROLL_END: c_str("NK_KEY_SCROLL_END"),
+    NK_KEY_SCROLL_UP: c_str("NK_KEY_SCROLL_UP"),
+    NK_KEY_SCROLL_DOWN: c_str("NK_KEY_SCROLL_DOWN"),
+    NK_KEY_SHIFT: c_str("NK_KEY_SHIFT")
   }
-  this.nk.glfont = this.wasm.instance.exports.alloc_nk_glfont(16.0, 10.512);
+  this.nk.glfont = this.wasm.instance.exports.alloc_nk_glfont(4 * (16.0), 4 * (10.512));
   this.nk.drawcmd = malloc(32);
   this.nk.op = 1;
   this.wasm.instance.exports.nk_init_default(this.nk.ctx, this.nk.glfont);
@@ -533,7 +614,7 @@ console.log({b_r,b_g,b_b,b_a});
       //let char_width = height * 0.5;
       let calc_width = char_width * length;
       if (DEBUG_FUNCTION_PRINTS) {
-        console.log("nk_wasm_command_text");
+        console.log("nk_wasm_command_text: " + s);
       }
       for (let i=0; i<length; i++) {
         g.glf.draw_char(s.charCodeAt(i), x + i*char_width, y + 1.2*height, char_width, height);
@@ -547,7 +628,7 @@ let display = function() {
   this.last_display_time = Date.now();
   this.is_display_queued = false;
   let wasm = this.wasm;
-  wasm.instance.exports.nk_rect(this.nk.rect, 50, 50, 230, 250);
+  wasm.instance.exports.nk_rect(this.nk.rect, 0, 0, this.width, this.height);
   wasm.instance.exports.nk_input_begin(this.nk.ctx);
   for (let i=0; i<this.input.length; i++) {
     let fn = this.input[i][0];
@@ -555,14 +636,31 @@ let display = function() {
     fn(...fn_arg);
   }
   wasm.instance.exports.nk_input_end(this.nk.ctx);
-  if (wasm.instance.exports.nk_begin(this.nk.ctx, this.nk.s.Demo, this.nk.rect, 87)) {
-  //if (wasm.instance.exports.nk_wasm_begin(nuklear.ctx, nuklear.s.Demo, 50.0, 50.0, 230.0, 250.0, 87)) {
-
+  wasm.instance.exports.nk_HWvWS(this.nk.ctx, this.width, this.height);
+	/*
+enum nk_panel_flags {
+    NK_WINDOW_BORDER            = NK_FLAG(0),
+    NK_WINDOW_MOVABLE           = NK_FLAG(1),
+    NK_WINDOW_SCALABLE          = NK_FLAG(2),
+    NK_WINDOW_CLOSABLE          = NK_FLAG(3),
+    NK_WINDOW_MINIMIZABLE       = NK_FLAG(4),
+    NK_WINDOW_NO_SCROLLBAR      = NK_FLAG(5),
+    NK_WINDOW_TITLE             = NK_FLAG(6),
+    NK_WINDOW_SCROLL_AUTO_HIDE  = NK_FLAG(7),
+    NK_WINDOW_BACKGROUND        = NK_FLAG(8),
+    NK_WINDOW_SCALE_LEFT        = NK_FLAG(9),
+    NK_WINDOW_NO_INPUT          = NK_FLAG(10)
+};
+87 = BORDER | MOVABLE | SCALABLE | MINIMIZABLE | TITLE
+343 = 87 | BACKGROUND
+*/
+	/*
+  wasm.instance.exports.nk_window_set_bounds(this.nk.ctx, this.nk.rect);
+  if (wasm.instance.exports.nk_begin(this.nk.ctx, this.nk.s.Demo, this.nk.rect, 0)) {
     wasm.instance.exports.nk_layout_row_static(this.nk.ctx, 30, 80, 1);
     if (wasm.instance.exports.nk_button_label(this.nk.ctx, this.nk.s.button)) {
       console.log("button pressed");
     }
-
     wasm.instance.exports.nk_layout_row_dynamic(this.nk.ctx, 30, 2);
     if (wasm.instance.exports.nk_option_label(this.nk.ctx, this.nk.s.easy, this.nk.op == 1)) { this.nk.op = 1; }
     if (wasm.instance.exports.nk_option_label(this.nk.ctx, this.nk.s.hard, this.nk.op == 2)) { this.nk.op = 2; }
@@ -570,13 +668,16 @@ let display = function() {
     wasm.instance.exports.nk_layout_row_dynamic(this.nk.ctx, 25, 1);
     wasm.instance.exports.nk_property_int(this.nk.ctx, this.nk.s.Compression, 0, this.nk.property, 100, 10, 1);
 
-
   }
   wasm.instance.exports.nk_end(this.nk.ctx);
+
   wasm.instance.exports.nk_wasm_draw_calculator(this.nk.ctx);
+  */
+	/*
   wasm.instance.exports.nk_wasm_draw_overview(this.nk.ctx);
   wasm.instance.exports.nk_wasm_draw_canvas(this.nk.ctx);
   wasm.instance.exports.nk_wasm_draw_node_editor(this.nk.ctx);
+  */
   this.gl.disable(this.gl.SCISSOR_TEST);
   wasm.instance.exports.nk_wasm_draw(this.nk.ctx);
   //console.log({draw_stack});
@@ -589,6 +690,10 @@ let nuklear = function(g)
     mousemove: mousemove,
     mousedown: mousedown,
     mouseup: mouseup,
+    keydown: keydown,
+    keyup: keyup,
+    width: 240,
+    height: 120,
     resize: resize,
     init: init,
     display: display,

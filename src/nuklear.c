@@ -243,17 +243,56 @@ float test_f(float a)
   return 2.5 * a;
 }
 
-unsigned char malloc_memory[1000000];
-size_t tail = 0;
-
-void *my_malloc(size_t size)
+void nk_HWvWS(struct nk_context *ctx, int width, int height)
 {
-  size_t curtail = tail;
-  tail = tail + size;
-  size_t off = 8 - (tail % 8);
-
-  if (off < 8) {
-    tail += off;
+  static char box_buffer[512];
+  static int box_len;
+  if (nk_begin(ctx, "HWvWS", nk_rect(0, 0, width, height), 0)) {
+    if (nk_tree_push(ctx, NK_TREE_NODE, "COM", NK_MINIMIZED)) {
+      nk_label(ctx, "Port:", NK_TEXT_LEFT);
+      nk_label(ctx, "Baudrate:", NK_TEXT_LEFT);
+      nk_label(ctx, "Parity:", NK_TEXT_LEFT);
+      nk_label(ctx, "DataBits:", NK_TEXT_LEFT);
+      nk_label(ctx, "StopBits:", NK_TEXT_LEFT);
+      if (nk_button_label(ctx, "OPEN")) {
+      }
+      nk_tree_pop(ctx);
+    }
   }
-  return &malloc_memory[curtail];
+  nk_end(ctx);
 }
+
+int nk_key_lookup(const char *s)
+{
+#define ENTRY(key) \
+  if (strcmp(#key, s) == 0) { \
+    return key; \
+  }
+  ENTRY(NK_KEY_BACKSPACE)
+  ENTRY(NK_KEY_COPY)
+  ENTRY(NK_KEY_CUT)
+  ENTRY(NK_KEY_DEL)
+  ENTRY(NK_KEY_DOWN)
+  ENTRY(NK_KEY_ENTER)
+  ENTRY(NK_KEY_LEFT)
+  ENTRY(NK_KEY_PASTE)
+  ENTRY(NK_KEY_RIGHT)
+  ENTRY(NK_KEY_SCROLL_DOWN)
+  ENTRY(NK_KEY_SCROLL_END)
+  ENTRY(NK_KEY_SCROLL_START)
+  ENTRY(NK_KEY_SCROLL_UP)
+  ENTRY(NK_KEY_SHIFT)
+  ENTRY(NK_KEY_TAB)
+  ENTRY(NK_KEY_TEXT_END)
+  ENTRY(NK_KEY_TEXT_LINE_END)
+  ENTRY(NK_KEY_TEXT_LINE_START)
+  ENTRY(NK_KEY_TEXT_REDO)
+  ENTRY(NK_KEY_TEXT_START)
+  ENTRY(NK_KEY_TEXT_UNDO)
+  ENTRY(NK_KEY_TEXT_WORD_LEFT)
+  ENTRY(NK_KEY_TEXT_WORD_RIGHT)
+  ENTRY(NK_KEY_UP)
+#undef ENTRY
+  return 0;
+}
+
